@@ -238,7 +238,7 @@ class TradingBot:
         if mode.lower().startswith("daily"):
             self.trade_manager.clear_trades()
 
-    async def wait_until(self, hour: int = 23, minute: int = 59):
+    async def wait_until(self, hour: int = 7, minute: int = 0):
         now = datetime.now()
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if target <= now:
@@ -248,12 +248,12 @@ class TradingBot:
 
     async def hourly_summary_loop(self, session: aiohttp.ClientSession):
         while True:
-            await asyncio.sleep(3600)  # 1 hour
+            await asyncio.sleep(1800)  # 1 hour
             await self.print_summary(session, mode="hourly")
 
     async def daily_summary_loop(self, session: aiohttp.ClientSession):
         while True:
-            await self.wait_until(23, 59)
+            await self.wait_until(7, 0)
             await self.print_summary(session, mode="daily")
 
     async def start_summary_loops(self, session: aiohttp.ClientSession):
