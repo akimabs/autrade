@@ -262,7 +262,7 @@ class TradingBot:
             self.daily_summary_loop(session),
         )
         
-    async def is_active_hour(start_hour=22, end_hour=7):
+    async def is_active_hour(self, start_hour=22, end_hour=7):
         now = datetime.now().time()
         if start_hour < end_hour:
             return start_hour <= now.hour < end_hour
