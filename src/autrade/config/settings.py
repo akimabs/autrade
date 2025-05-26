@@ -74,8 +74,8 @@ def load_config() -> Config:
     # Risk configuration
     risk_config = RiskConfig(
         max_spread_percent=0.15,
-        max_consecutive_losses=3,
-        max_daily_trades=10,
+        max_consecutive_losses=None,
+        max_daily_trades=None,
         min_atr_ratio=0.005,
         scan_interval=60
     )

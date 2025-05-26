@@ -157,12 +157,17 @@ class TradingBot:
 
             self.trade_manager.reset_daily_counters()
 
-            if self.trade_manager.daily_trade_count >= self.config.risk.max_daily_trades:
+            if (
+                self.config.risk.max_daily_trades is not None and 
+                self.trade_manager.daily_trade_count >= self.config.risk.max_daily_trades
+            ):
                 print(f"⚠️ Daily trade limit reached ({self.config.risk.max_daily_trades} trades)")
                 await asyncio.sleep(self.config.risk.scan_interval)
                 continue
-
-            if self.trade_manager.consecutive_losses >= self.config.risk.max_consecutive_losses:
+            if (
+                self.config.risk.max_consecutive_losses is not None and 
+                self.trade_manager.consecutive_losses >= self.config.risk.max_consecutive_losses
+            ):
                 print(f"⚠️ Trading paused due to {self.trade_manager.consecutive_losses} consecutive losses")
                 await asyncio.sleep(self.config.risk.scan_interval)
                 continue
