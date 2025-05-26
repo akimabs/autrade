@@ -93,10 +93,12 @@ def load_config() -> Config:
         base_url="https://fapi.binance.com"
     )
 
+    # Get fixed USDT balance from environment variable
+    fixed_usdt_balance = os.getenv("FIXED_USDT_BALANCE", "100")  # Default to 100 USDT if not set
     return Config(
         trading=trading_config,
         risk=risk_config,
         telegram=telegram_config,
         binance=binance_config,
-        fixed_usdt_balance=Decimal("9.22")
+        fixed_usdt_balance=Decimal(fixed_usdt_balance)
     ) 

@@ -47,6 +47,7 @@ BINANCE_API_SECRET=your_api_secret
 TELEGRAM_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_telegram_chat_id
 TRADING_MODE=balanced  # Options: safe, balanced, aggressive
+FIXED_USDT_BALANCE=100  # Set your desired fixed trading amount in USDT
 ```
 
 ## Usage
@@ -66,6 +67,17 @@ The bot can be configured through environment variables:
 - `BINANCE_API_SECRET`: Your Binance API secret
 - `TELEGRAM_TOKEN`: Your Telegram bot token
 - `TELEGRAM_CHAT_ID`: Your Telegram chat ID
+- `FIXED_USDT_BALANCE`: Set a fixed USDT balance for trading (e.g., "100" for 100 USDT). This helps manage risk by limiting the trading amount regardless of your total balance.
+
+Example `.env` configuration:
+```env
+BINANCE_API_KEY=your_api_key
+BINANCE_API_SECRET=your_api_secret
+TELEGRAM_TOKEN=your_telegram_bot_token
+TELEGRAM_CHAT_ID=your_telegram_chat_id
+TRADING_MODE=balanced  # Options: safe, balanced, aggressive
+FIXED_USDT_BALANCE=100  # Set your desired fixed trading amount in USDT
+```
 
 ## Trading Modes
 
