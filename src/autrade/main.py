@@ -261,16 +261,29 @@ class TradingBot:
             self.hourly_summary_loop(session),
             self.daily_summary_loop(session),
         )
+        
+    async def is_active_hour(start_hour=22, end_hour=7):
+        now = datetime.now().time()
+        if start_hour < end_hour:
+            return start_hour <= now.hour < end_hour
+        else:
+            return now.hour >= start_hour or now.hour < end_hour
 
     async def run(self):
-        async with aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(ssl=ssl._create_unverified_context())
-        ) as session:
-            await asyncio.gather(
-                self.bot_loop(session),
-                self.update_positions(session),
-                self.start_summary_loops(session)
-            )
+        while True:
+            if await self.is_active_hour(22, 7):
+                print("⏰ Aktif! Menjalankan bot...")
+                async with aiohttp.ClientSession(
+                    connector=aiohttp.TCPConnector(ssl=ssl._create_unverified_context())
+                ) as session:
+                    await asyncio.gather(
+                        self.bot_loop(session),
+                        self.update_positions(session),
+                        self.start_summary_loops(session)
+                    )
+            else:
+                print("🛑 Diluar jam aktif (22:00 - 07:00). Tidur 5 menit...")
+                await asyncio.sleep(300)  # 5 menit
 
 def main():
     bot = TradingBot()
