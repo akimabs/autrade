@@ -1,0 +1,119 @@
+Metadata-Version: 2.1
+Name: autotrade
+Version: 0.1.0
+Summary: A cryptocurrency trading bot
+Home-page: https://github.com/yourusername/autotrade
+Author: Your Name
+Author-email: your.email@example.com
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+
+# AutoTrade - Cryptocurrency Trading Bot
+
+A Python-based cryptocurrency trading bot that uses technical analysis to make trading decisions on Binance Futures.
+
+## Screenshots
+
+| Loss Trade                                                                       | Profit Trade                                                                         | Daily Summary                                                                         |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| ![Loss Trade](https://github.com/akimabs/autrade/raw/main/screnshoots/lose.jpeg) | ![Profit Trade](https://github.com/akimabs/autrade/raw/main/screnshoots/profit.jpeg) | ![Daily Summary](https://github.com/akimabs/autrade/raw/main/screnshoots/sumary.jpeg) |
+
+## Features
+
+- Real-time market analysis using technical indicators (RSI, EMA, Bollinger Bands)
+- Multiple trading modes (safe, balanced, aggressive)
+- Risk management with configurable stop-loss and take-profit levels
+- Telegram notifications for trade entries, exits, and daily summaries
+- Automated position management
+- Performance tracking and reporting
+
+## Installation
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/akimabs/autrade.git
+cd autrade
+```
+
+2. Create and activate a virtual environment:
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install the package:
+
+```bash
+pip install -e .
+```
+
+4. Create a `.env` file in the project root with your configuration:
+
+```env
+BINANCE_API_KEY=your_api_key
+BINANCE_API_SECRET=your_api_secret
+TELEGRAM_TOKEN=your_telegram_bot_token
+TELEGRAM_CHAT_ID=your_telegram_chat_id
+TRADING_MODE=balanced  # Options: safe, balanced, aggressive
+```
+
+## Usage
+
+Run the bot:
+
+```bash
+python -m autotrade.main
+```
+
+## Configuration
+
+The bot can be configured through environment variables:
+
+- `TRADING_MODE`: Trading strategy aggressiveness (safe, balanced, aggressive)
+- `BINANCE_API_KEY`: Your Binance API key
+- `BINANCE_API_SECRET`: Your Binance API secret
+- `TELEGRAM_TOKEN`: Your Telegram bot token
+- `TELEGRAM_CHAT_ID`: Your Telegram chat ID
+
+## Trading Modes
+
+1. **Safe Mode**
+
+   - Leverage: 1x
+   - Take Profit: 0.5%
+   - Stop Loss: 0.3%
+
+2. **Balanced Mode**
+
+   - Leverage: 10x
+   - Take Profit: 1.0%
+   - Stop Loss: 0.5%
+
+3. **Aggressive Mode**
+   - Leverage: 25x
+   - Take Profit: 0.6%
+   - Stop Loss: 0.3%
+
+## Risk Management
+
+- Maximum spread: 0.15%
+- Maximum consecutive losses: 3
+- Maximum daily trades: 10
+- Minimum ATR ratio: 0.5%
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
