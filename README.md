@@ -1,4 +1,4 @@
-# AutoTrade - Cryptocurrency Trading Bot
+# AutoTrade - Cryptocurrency Trading Bot (Beta Testing)
 
 A Python-based cryptocurrency trading bot that uses technical analysis to make trading decisions on Binance Futures.
 
