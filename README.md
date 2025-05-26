@@ -1,4 +1,4 @@
-# AutoTrade - Cryptocurrency Trading Bot (Beta Testing)
+# AutoTrade - Cryptocurrency Trading Bot (Winrate Testing)
 
 A Python-based cryptocurrency trading bot that uses technical analysis to make trading decisions on Binance Futures.
 
@@ -70,6 +70,7 @@ The bot can be configured through environment variables:
 - `FIXED_USDT_BALANCE`: Set a fixed USDT balance for trading (e.g., "100" for 100 USDT). This helps manage risk by limiting the trading amount regardless of your total balance.
 
 Example `.env` configuration:
+
 ```env
 BINANCE_API_KEY=your_api_key
 BINANCE_API_SECRET=your_api_secret
