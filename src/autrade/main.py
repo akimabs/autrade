@@ -28,7 +28,7 @@ class TradingBot:
     async def update_positions(self, session: aiohttp.ClientSession):
         while True:
             if not self.trade_manager.positions:
-                await asyncio.sleep(10)
+                await asyncio.sleep(3)
                 continue
 
             for symbol, position in list(self.trade_manager.positions.items()):
