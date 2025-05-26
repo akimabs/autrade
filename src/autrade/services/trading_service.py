@@ -178,7 +178,23 @@ class TradingService:
             print(f"⚠️ Skip {symbol} karena harga tidak dalam rentang: {price}")
             return
 
-        qty, tp_price, sl_price = await self.calculate_position_size(price, atr)
+        qty = (
+            Decimal(self.config.fixed_usdt_balance * self.config.trading.usdt_percentage * self.config.trading.leverage) /
+            Decimal(str(price))
+        ).quantize(Decimal('0.001'), rounding=ROUND_DOWN)
+
+        atr_decimal = Decimal(str(atr))
+        price_decimal = Decimal(str(price))
+
+        if signal == "LONG":
+            tp_price = price_decimal + (atr_decimal * Decimal('1.2'))
+            sl_price = price_decimal - (atr_decimal * Decimal('0.8'))
+            side = "BUY"
+        else:
+            tp_price = price_decimal - (atr_decimal * Decimal('1.2'))
+            sl_price = price_decimal + (atr_decimal * Decimal('0.8'))
+            side = "SELL"
+
         notional = float(qty) * price
 
         if notional < 5:
