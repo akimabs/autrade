@@ -4,9 +4,9 @@ A Python-based cryptocurrency trading bot that uses technical analysis to make t
 
 ## Screenshots
 
-| Loss Trade                                                                       | Profit Trade                                                                         | Daily Summary                                                                         |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| ![Loss Trade](https://github.com/akimabs/autrade/raw/main/screnshoots/lose.jpeg) | ![Profit Trade](https://github.com/akimabs/autrade/raw/main/screnshoots/profit.jpeg) | ![Daily Summary](https://github.com/akimabs/autrade/raw/main/screnshoots/sumary.jpeg) |
+| Loss Trade                                                                                              | Profit Trade                                                                                                | Daily Summary                                                                                                  |
+| ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| ![Loss Trade](https://raw.githubusercontent.com/akimabs/autrade/refs/heads/main/screenshoots/lose.jpeg) | ![Profit Trade](https://raw.githubusercontent.com/akimabs/autrade/refs/heads/main/screenshoots/profit.jpeg) | ![Summary Report](https://raw.githubusercontent.com/akimabs/autrade/refs/heads/main/screenshoots/summary.jpeg) |
 
 ## Features
 
