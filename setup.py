@@ -11,6 +11,7 @@ setup(
         "python-dotenv",
         "ta",
         "python-binance",
+        "Pillow"
     ],
     python_requires=">=3.7",
     author="Your Name",
