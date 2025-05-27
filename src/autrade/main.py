@@ -1,7 +1,7 @@
 import asyncio
 import ssl
 import aiohttp
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 
 from .config.settings import load_config
@@ -263,11 +263,22 @@ class TradingBot:
         )
         
     async def is_active_hour(self, start_hour=22, end_hour=7):
-        now = datetime.now().time()
+        now = datetime.now(timezone(timedelta(hours=7)))
+
+        start_time = now.replace(hour=start_hour, minute=0, second=0, microsecond=0)
+        end_time = now.replace(hour=end_hour, minute=0, second=0, microsecond=0)
+
         if start_hour < end_hour:
-            return start_hour <= now.hour < end_hour
+            # Contoh: aktif antara 08:00 - 17:00
+            return start_time <= now < end_time
         else:
-            return now.hour >= start_hour or now.hour < end_hour
+            # Contoh: aktif antara 22:00 - 07:00 (melewati tengah malam)
+            if now >= start_time:
+                return True
+            elif now < end_time:
+                return True
+            else:
+                return False
 
     async def run(self):
         while True:
