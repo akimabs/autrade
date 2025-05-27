@@ -281,12 +281,23 @@ class TradingBot:
                 return False
 
     async def run(self):
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
         while True:
             if await self.is_active_hour(22, 7):
                 print("⏰ Aktif! Menjalankan bot...")
                 async with aiohttp.ClientSession(
-                    connector=aiohttp.TCPConnector(ssl=ssl._create_unverified_context())
+                    connector=aiohttp.TCPConnector(ssl=ssl_context)
                 ) as session:
+                    # Test API connection first
+                    if self.config.binance.bot_mode == "REAL":
+                        if not await self.binance_service.test_connection(session):
+                            print("❌ API connection test failed. Please check your API key permissions.")
+                            await asyncio.sleep(300)
+                            continue
+                    
                     await asyncio.gather(
                         self.bot_loop(session),
                         self.update_positions(session),

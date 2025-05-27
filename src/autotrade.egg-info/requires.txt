@@ -3,3 +3,4 @@ pandas
 python-dotenv
 ta
 python-binance
+Pillow

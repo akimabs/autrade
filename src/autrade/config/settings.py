@@ -30,6 +30,7 @@ class BinanceConfig:
     api_key: str
     api_secret: str
     base_url: str
+    bot_mode: str
 
 @dataclass
 class Config:
@@ -41,6 +42,10 @@ class Config:
 
 def load_config() -> Config:
     load_dotenv()
+    
+    # Bot mode configuration
+    bot_mode = os.getenv("BOT_MODE")
+    print(bot_mode)
     
     # Trading mode configuration
     trading_mode = os.getenv("TRADING_MODE", "balanced")
@@ -55,7 +60,7 @@ def load_config() -> Config:
     elif trading_mode == "balanced":
         trading_config = TradingConfig(
             mode="balanced",
-            leverage=10,
+            leverage=5,
             usdt_percentage=1,
             tp_percent=1.0,
             sl_percent=0.5
@@ -63,7 +68,7 @@ def load_config() -> Config:
     elif trading_mode == "aggressive":
         trading_config = TradingConfig(
             mode="aggressive",
-            leverage=25,
+            leverage=10,
             usdt_percentage=1,
             tp_percent=0.6,
             sl_percent=0.3
@@ -74,7 +79,7 @@ def load_config() -> Config:
     # Risk configuration
     risk_config = RiskConfig(
         max_spread_percent=0.15,
-        max_consecutive_losses=None,
+        max_consecutive_losses=3,
         max_daily_trades=None,
         min_atr_ratio=0.005,
         scan_interval=60
@@ -90,8 +95,10 @@ def load_config() -> Config:
     binance_config = BinanceConfig(
         api_key=os.getenv("BINANCE_API_KEY", ""),
         api_secret=os.getenv("BINANCE_API_SECRET", ""),
-        base_url="https://fapi.binance.com"
+        base_url="https://fapi.binance.com",
+        bot_mode=bot_mode
     )
+    print(binance_config)
 
     # Get fixed USDT balance from environment variable
     fixed_usdt_balance = os.getenv("FIXED_USDT_BALANCE", "100")  # Default to 100 USDT if not set

@@ -15,15 +15,15 @@ Classifier: Programming Language :: Python :: 3.9
 Requires-Python: >=3.7
 Description-Content-Type: text/markdown
 
-# AutoTrade - Cryptocurrency Trading Bot
+# AutoTrade - Cryptocurrency Trading Bot (Winrate Testing)
 
 A Python-based cryptocurrency trading bot that uses technical analysis to make trading decisions on Binance Futures.
 
 ## Screenshots
 
-| Loss Trade                                                                       | Profit Trade                                                                         | Daily Summary                                                                         |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| ![Loss Trade](https://github.com/akimabs/autrade/raw/main/screnshoots/lose.jpeg) | ![Profit Trade](https://github.com/akimabs/autrade/raw/main/screnshoots/profit.jpeg) | ![Daily Summary](https://github.com/akimabs/autrade/raw/main/screnshoots/sumary.jpeg) |
+| Loss Trade                                                                                              | Profit Trade                                                                                                | Summary Report                                                                                                 |
+| ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| ![Loss Trade](https://raw.githubusercontent.com/akimabs/autrade/refs/heads/main/screenshoots/lose.jpeg) | ![Profit Trade](https://raw.githubusercontent.com/akimabs/autrade/refs/heads/main/screenshoots/profit.jpeg) | ![Summary Report](https://raw.githubusercontent.com/akimabs/autrade/refs/heads/main/screenshoots/summary.jpeg) |
 
 ## Features
 
@@ -33,6 +33,7 @@ A Python-based cryptocurrency trading bot that uses technical analysis to make t
 - Telegram notifications for trade entries, exits, and daily summaries
 - Automated position management
 - Performance tracking and reporting
+- Trade during US market hours: 22:00–07:00 (Indonesian time).
 
 ## Installation
 
@@ -64,6 +65,7 @@ BINANCE_API_SECRET=your_api_secret
 TELEGRAM_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_telegram_chat_id
 TRADING_MODE=balanced  # Options: safe, balanced, aggressive
+FIXED_USDT_BALANCE=100  # Set your desired fixed trading amount in USDT
 ```
 
 ## Usage
@@ -71,7 +73,7 @@ TRADING_MODE=balanced  # Options: safe, balanced, aggressive
 Run the bot:
 
 ```bash
-python -m autotrade.main
+python -m autrade.main
 ```
 
 ## Configuration
@@ -83,6 +85,18 @@ The bot can be configured through environment variables:
 - `BINANCE_API_SECRET`: Your Binance API secret
 - `TELEGRAM_TOKEN`: Your Telegram bot token
 - `TELEGRAM_CHAT_ID`: Your Telegram chat ID
+- `FIXED_USDT_BALANCE`: Set a fixed USDT balance for trading (e.g., "100" for 100 USDT). This helps manage risk by limiting the trading amount regardless of your total balance.
+
+Example `.env` configuration:
+
+```env
+BINANCE_API_KEY=your_api_key
+BINANCE_API_SECRET=your_api_secret
+TELEGRAM_TOKEN=your_telegram_bot_token
+TELEGRAM_CHAT_ID=your_telegram_chat_id
+TRADING_MODE=balanced  # Options: safe, balanced, aggressive
+FIXED_USDT_BALANCE=100  # Set your desired fixed trading amount in USDT
+```
 
 ## Trading Modes
 
