@@ -16,6 +16,7 @@ A Python-based cryptocurrency trading bot that uses technical analysis to make t
 - Telegram notifications for trade entries, exits, and daily summaries
 - Automated position management
 - Performance tracking and reporting
+- Trade during US market hours: 22:00–07:00 (Indonesian time).
 
 ## Installation
 
