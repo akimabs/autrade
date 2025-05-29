@@ -15,11 +15,11 @@ setup(
     ],
     python_requires=">=3.7",
     author="Your Name",
-    author_email="your.email@example.com",
+    author_email="ahakimabs@gmail.com",
     description="A cryptocurrency trading bot",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/autotrade",
+    url="https://github.com/akimabs/autrade",
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
