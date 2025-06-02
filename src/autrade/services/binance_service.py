@@ -8,12 +8,14 @@ import aiohttp
 import pandas as pd
 from decimal import Decimal, ROUND_DOWN
 import ssl
+import asyncio
 
-from ..config.settings import BinanceConfig
+from ..config.settings import Config
 
 class BinanceService:
-    def __init__(self, config: BinanceConfig):
+    def __init__(self, config: Config, trade_manager=None):
         self.config = config
+        self.trade_manager = trade_manager
         # Create SSL context
         self.ssl_context = ssl.create_default_context()
         self.ssl_context.check_hostname = False
@@ -21,7 +23,7 @@ class BinanceService:
 
     def _sign(self, query: str) -> str:
         return hmac.new(
-            self.config.api_secret.encode(),
+            self.config.binance.api_secret.encode(),
             query.encode(),
             hashlib.sha256
         ).hexdigest()
@@ -39,10 +41,10 @@ class BinanceService:
         params['timestamp'] = int(time.time() * 1000)
         query = urllib.parse.urlencode(params)
         signature = self._sign(query)
-        url = f"{self.config.base_url}{endpoint}?{query}&signature={signature}"
+        url = f"{self.config.binance.base_url}{endpoint}?{query}&signature={signature}"
 
         headers = {
-            "X-MBX-APIKEY": self.config.api_key
+            "X-MBX-APIKEY": self.config.binance.api_key
         }
 
         try:
@@ -142,44 +144,268 @@ class BinanceService:
             print(f"Error setting leverage: {e}")
             return False
 
+    async def get_symbol_precision(self, session: aiohttp.ClientSession, symbol: str) -> int:
+        try:
+            info = await self.request(session, 'GET', '/fapi/v1/exchangeInfo')
+            for s in info['symbols']:
+                if s['symbol'] == symbol:
+                    for f in s['filters']:
+                        if f['filterType'] == 'LOT_SIZE':
+                            step_size = float(f['stepSize'])
+                            precision = 0
+                            while step_size < 1:
+                                step_size *= 10
+                                precision += 1
+                            return precision
+            return 3  # Default precision if not found
+        except Exception as e:
+            print(f"Error getting symbol precision: {e}")
+            return 3  # Default precision on error
+
+    async def get_account_balance(self, session: aiohttp.ClientSession) -> float:
+        try:
+            response = await self.request(session, 'GET', '/fapi/v2/account')
+            if "error" in response:
+                print(f"❌ Error getting balance: {response['error']}")
+                return 0.0
+
+            for asset in response.get('assets', []):
+                if asset['asset'] == 'USDT':
+                    return float(asset['walletBalance'])
+            return 0.0
+        except Exception as e:
+            print(f"❌ Error getting balance: {e}")
+            return 0.0
+
+    async def get_price_precision(self, session: aiohttp.ClientSession, symbol: str) -> int:
+        try:
+            info = await self.request(session, 'GET', '/fapi/v1/exchangeInfo')
+            for s in info['symbols']:
+                if s['symbol'] == symbol:
+                    for f in s['filters']:
+                        if f['filterType'] == 'PRICE_FILTER':
+                            tick_size = float(f['tickSize'])
+                            precision = 0
+                            while tick_size < 1:
+                                tick_size *= 10
+                                precision += 1
+                            return precision
+            return 8  # Default precision if not found
+        except Exception as e:
+            print(f"Error getting price precision: {e}")
+            return 8  # Default precision on error
+
+    async def cancel_all_orders(self, session: aiohttp.ClientSession, symbol: str) -> bool:
+        try:
+            print(f"\n🔄 Canceling all orders for {symbol}...")
+            response = await self.request(session, 'DELETE', '/fapi/v1/allOpenOrders', {'symbol': symbol})
+            if 'error' in response:
+                print(f"❌ Error canceling orders: {response['error']}")
+                return False
+            
+            # Check if orders were actually canceled
+            open_orders = await self.request(session, 'GET', '/fapi/v1/openOrders', {'symbol': symbol})
+            if isinstance(open_orders, list) and len(open_orders) == 0:
+                print(f"✅ Successfully canceled all orders for {symbol}")
+                return True
+            else:
+                print(f"⚠️ Some orders might still be open for {symbol}")
+                return False
+        except Exception as e:
+            print(f"❌ Error canceling orders: {e}")
+            return False
+
+    async def get_position(self, session: aiohttp.ClientSession, symbol: str) -> Optional[Dict]:
+        try:
+            if self.config.binance.bot_mode == "DEMO":
+                # For demo mode, we'll simulate an open position
+                # Get the actual position data from trade manager
+                position = self.trade_manager.positions.get(symbol)
+                if not position:
+                    return None
+                    
+                return {
+                    'symbol': symbol,
+                    'positionAmt': str(position.qty),
+                    'entryPrice': str(position.entry),
+                    'markPrice': str(position.mark_price),
+                    'unRealizedProfit': '0.0',
+                    'liquidationPrice': str(position.liquidation_price),
+                    'leverage': str(position.leverage),
+                    'isolated': False,
+                    'isAutoAddMargin': False,
+                    'positionSide': 'BOTH',
+                    'notional': str(abs(float(position.qty) * float(position.entry))),
+                    'isolatedWallet': '0.0',
+                    'updateTime': int(datetime.now().timestamp() * 1000)
+                }
+            
+            # Only make API call if not in demo mode
+            response = await self.request(session, 'GET', '/fapi/v2/positionRisk', {'symbol': symbol})
+            if 'error' in response:
+                print(f"❌ Error getting position: {response['error']}")
+                return None
+            
+            for position in response:
+                if position['symbol'] == symbol and float(position['positionAmt']) != 0:
+                    return position
+            return None
+        except Exception as e:
+            print(f"❌ Error getting position: {e}")
+            return None
+
+    async def get_trades(self, session: aiohttp.ClientSession, symbol: str) -> List[Dict]:
+        """Get recent trades for a symbol"""
+        try:
+            response = await self.request(session, 'GET', '/fapi/v1/userTrades', {'symbol': symbol})
+            if 'error' in response:
+                print(f"❌ Error getting trades: {response['error']}")
+                return []
+            
+            # Sort trades by time in descending order (newest first)
+            trades = sorted(response, key=lambda x: int(x['time']), reverse=True)
+            return trades
+        except Exception as e:
+            print(f"❌ Error getting trades: {e}")
+            return []
+
     async def place_order(
         self,
         session: aiohttp.ClientSession,
         symbol: str,
         side: str,
         qty: Optional[float] = None,
-        reduce_only: bool = False
+        reduce_only: bool = False,
+        tp_price: Optional[float] = None,
+        sl_price: Optional[float] = None
     ) -> Dict:
-        if self.config.bot_mode == "DEMO":
-            print(f"[DEMO] {side} {symbol} qty={qty} reduceOnly={reduce_only}")
-            return {
+        print(f"\n📊 Placing {self.config.binance.bot_mode} order:")
+        print(f"Symbol: {symbol}")
+        print(f"Side: {side}")
+        print(f"Quantity: {qty}")
+        print(f"Reduce Only: {reduce_only}")
+        if tp_price:
+            print(f"Take Profit: {tp_price}")
+        if sl_price:
+            print(f"Stop Loss: {sl_price}")
+
+        if self.config.binance.bot_mode == "DEMO":
+            # In demo mode, just return a mock response without making any API calls
+            order_response = {
                 "orderId": f"DEMO-{int(datetime.now().timestamp())}",
                 "symbol": symbol,
                 "side": side,
                 "type": "MARKET",
                 "quantity": qty,
                 "reduceOnly": reduce_only,
-                "status": "FILLED"
+                "status": "FILLED",
+                "price": "0.0",  # Mock price
+                "executedQty": str(qty),
+                "time": int(datetime.now().timestamp() * 1000)
             }
+            print(f"✅ DEMO Order placed successfully: {order_response}")
+            return order_response
 
         try:
+            # Cancel all existing orders only if reduce_only = True
+            if reduce_only:
+                print(f"🔄 Canceling all open orders for {symbol} before reduce-only order...")
+                await self.cancel_all_orders(session, symbol)
+
+            # Get symbol precision and round quantity
+            qty_precision = await self.get_symbol_precision(session, symbol)
+            price_precision = await self.get_price_precision(session, symbol)
+            
+            if qty is not None:
+                qty = round(qty, qty_precision)
+                print(f"Adjusted quantity to {qty_precision} decimals: {qty}")
+            else:
+                print("❌ Error: Quantity is required")
+                return {"error": "Quantity is required"}
+
+            # Get balance
+            balance = await self.get_account_balance(session)
+            print(f"💰 Current Balance: {balance:.2f} USDT")
+
+            # Set leverage
             leverage_set = await self.set_leverage(session, symbol, self.config.trading.leverage)
             if not leverage_set:
+                print("❌ Failed to set leverage")
                 return {"error": "Failed to set leverage"}
 
-            params = {
+            # Place entry/reduce-only order
+            entry_params = {
                 'symbol': symbol,
                 'side': side,
                 'type': 'MARKET',
-                'quantity': qty,
+                'quantity': str(qty),
                 'reduceOnly': reduce_only
             }
 
-            response = await self.request(session, 'POST', '/fapi/v1/order', params)
-            if 'orderId' in response:
-                print(f"✅ Order success: {response}")
-            else:
-                print(f"❌ Order failed: {response}")
-            return response
+            entry_response = await self.request(session, 'POST', '/fapi/v1/order', entry_params)
+            if 'orderId' not in entry_response:
+                print(f"❌ Entry order failed: {entry_response}")
+                return entry_response
+
+            print(f"✅ Entry order placed successfully: {entry_response}")
+
+            # If reduce-only, no TP/SL needed
+            if reduce_only:
+                return entry_response
+
+            # Add delay
+            await asyncio.sleep(1)
+
+            # Get current price
+            current_price = await self.get_mark_price(session, symbol)
+            print(f"Current price before placing TP/SL: {current_price}")
+
+            buffer = 0.0001
+
+            # TP Order
+            if tp_price:
+                tp_side = "SELL" if side == "BUY" else "BUY"
+                tp_price_rounded = round(tp_price, price_precision)
+                if (side == "BUY" and current_price >= tp_price - buffer) or (side == "SELL" and current_price <= tp_price + buffer):
+                    print(f"⚠️ TP price {tp_price_rounded} too close to current price {current_price}, skipping TP order")
+                else:
+                    tp_params = {
+                        'symbol': symbol,
+                        'side': tp_side,
+                        'type': 'TAKE_PROFIT_MARKET',
+                        'quantity': str(qty),
+                        'stopPrice': str(tp_price_rounded),
+                        'closePosition': True
+                    }
+                    tp_response = await self.request(session, 'POST', '/fapi/v1/order', tp_params)
+                    if 'orderId' in tp_response:
+                        print(f"✅ TP order placed successfully: {tp_response}")
+                    else:
+                        print(f"❌ TP order failed: {tp_response}")
+
+            # SL Order
+            if sl_price:
+                sl_side = "SELL" if side == "BUY" else "BUY"
+                sl_price_rounded = round(sl_price, price_precision)
+                if (side == "BUY" and current_price <= sl_price + buffer) or (side == "SELL" and current_price >= sl_price - buffer):
+                    print(f"⚠️ SL price {sl_price_rounded} too close to current price {current_price}, skipping SL order")
+                else:
+                    sl_params = {
+                        'symbol': symbol,
+                        'side': sl_side,
+                        'type': 'STOP_MARKET',
+                        'quantity': str(qty),
+                        'stopPrice': str(sl_price_rounded),
+                        'closePosition': True
+                    }
+                    sl_response = await self.request(session, 'POST', '/fapi/v1/order', sl_params)
+                    if 'orderId' in sl_response:
+                        print(f"✅ SL order placed successfully: {sl_response}")
+                    else:
+                        print(f"❌ SL order failed: {sl_response}")
+
+            return entry_response
+
         except Exception as e:
+            print(f"❌ Error placing order: {str(e)}")
             return {"error": str(e)}

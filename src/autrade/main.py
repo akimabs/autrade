@@ -3,6 +3,9 @@ import ssl
 import aiohttp
 from datetime import datetime, timedelta, timezone
 import os
+import csv
+import pandas as pd
+from typing import Dict
 
 from .config.settings import load_config
 from .models.trade import TradeManager
@@ -14,9 +17,9 @@ from src.autrade.utils.report import create_trading_report, create_summary_repor
 class TradingBot:
     def __init__(self):
         self.config = load_config()
-        self.binance_service = BinanceService(self.config.binance)
-        self.telegram_service = TelegramService(self.config.telegram)
         self.trade_manager = TradeManager()
+        self.binance_service = BinanceService(self.config, self.trade_manager)
+        self.telegram_service = TelegramService(self.config.telegram)
         self.trading_service = TradingService(
             self.config,
             self.binance_service,
@@ -24,129 +27,514 @@ class TradingBot:
             self.trade_manager
         )
         self.position_messages = {}  # {symbol: message_id}
+        self.csv_file = "data/trades.csv"
+        self._ensure_csv_exists()
+
+    def _ensure_csv_exists(self):
+        """Ensure CSV file exists with headers"""
+        os.makedirs("data", exist_ok=True)
+        if not os.path.exists(self.csv_file):
+            headers = [
+                "timestamp", "symbol", "side", "entry_price", "exit_price", "quantity",
+                "leverage", "pnl", "roi", "duration", "close_reason", "balance",
+                "margin_used", "margin_call_price", "take_profit", "stop_loss",
+                "atr", "spread", "signal_mode", "rsi", "ema20", "ema50",
+                "last_close", "lower_band", "upper_band", "is_green", "is_red",
+                "signal", "volume_now", "volume_avg10", "entry_time", "exit_time",
+                "reason", "price_change_5m", "bb_width", "trend_strength",
+                "candle_pattern", "entry_confidence_score", "is_win"
+            ]
+            with open(self.csv_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(headers)
+        else:
+            # Check if file is empty or has no headers
+            with open(self.csv_file, 'r') as f:
+                first_line = f.readline().strip()
+                if not first_line:  # If file is empty
+                    headers = [
+                        "timestamp", "symbol", "side", "entry_price", "exit_price", "quantity",
+                        "leverage", "pnl", "roi", "duration", "close_reason", "balance",
+                        "margin_used", "margin_call_price", "take_profit", "stop_loss",
+                        "atr", "spread", "signal_mode", "rsi", "ema20", "ema50",
+                        "last_close", "lower_band", "upper_band", "is_green", "is_red",
+                        "signal", "volume_now", "volume_avg10", "entry_time", "exit_time",
+                        "reason", "price_change_5m", "bb_width", "trend_strength",
+                        "candle_pattern", "entry_confidence_score", "is_win"
+                    ]
+                    with open(self.csv_file, 'w', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(headers)
+
+    def save_trade_to_csv(self, trade_data: Dict):
+        """Save trade data to CSV file"""
+        try:
+            # Create DataFrame with trade data
+            df = pd.DataFrame([{
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "symbol": trade_data["symbol"],
+                "side": trade_data["side"],
+                "entry_price": trade_data["entry_price"],
+                "exit_price": trade_data["exit_price"],
+                "quantity": trade_data["quantity"],
+                "leverage": trade_data["leverage"],
+                "pnl": trade_data["pnl"],
+                "roi": trade_data["roi"],
+                "duration": trade_data["duration"],
+                "close_reason": trade_data["close_reason"],
+                "balance": trade_data["balance"],
+                "margin_used": trade_data["margin_used"],
+                "margin_call_price": trade_data["margin_call_price"],
+                "take_profit": trade_data["take_profit"],
+                "stop_loss": trade_data["stop_loss"],
+                "atr": trade_data["atr"],
+                "spread": trade_data["spread"],
+                "signal_mode": trade_data["signal_mode"],
+                "rsi": trade_data["rsi"],
+                "ema20": trade_data["ema20"],
+                "ema50": trade_data["ema50"],
+                "last_close": trade_data["last_close"],
+                "lower_band": trade_data["lower_band"],
+                "upper_band": trade_data["upper_band"],
+                "is_green": trade_data["is_green"],
+                "is_red": trade_data["is_red"],
+                "signal": trade_data["signal"],
+                "volume_now": trade_data["volume_now"],
+                "volume_avg10": trade_data["volume_avg10"],
+                "entry_time": trade_data["entry_time"],
+                "exit_time": trade_data["exit_time"],
+                "reason": trade_data["reason"],
+                "price_change_5m": trade_data["price_change_5m"],
+                "bb_width": trade_data["bb_width"],
+                "trend_strength": trade_data["trend_strength"],
+                "candle_pattern": trade_data["candle_pattern"],
+                "entry_confidence_score": trade_data["entry_confidence_score"],
+                "is_win": 1 if trade_data["pnl"] > 0 else 0
+            }])
+
+            # Save to CSV with proper formatting
+            csv_path = "data/trades.csv"
+            df.to_csv(csv_path, mode='a', header=not os.path.exists(csv_path), index=False, line_terminator='\n', quoting=csv.QUOTE_ALL)
+            print(f"✅ Trade data saved to {csv_path}")
+
+        except Exception as e:
+            print(f"❌ Error saving trade data: {e}")
+            print(f"Available keys in trade_data: {list(trade_data.keys())}")  # Debug info
 
     async def update_positions(self, session: aiohttp.ClientSession):
+        """Update active positions and check for closures"""
         while True:
-            if not self.trade_manager.positions:
-                await asyncio.sleep(3)
-                continue
-
             for symbol, position in list(self.trade_manager.positions.items()):
-                mark_price = await self.binance_service.get_mark_price(session, symbol)
-                entry = position.entry
-                qty = position.qty
-                tp_price = float(position.tp_price)
-                sl_price = position.sl_price
-                side = position.side
-
-                pnl = (mark_price - entry) * qty if side == "BUY" else (entry - mark_price) * qty
-                pnl_pct = ((mark_price - entry) / entry) * 100 if side == "BUY" else ((entry - mark_price) / entry) * 100
-                now = datetime.now().strftime("%H:%M:%S")
-                tp_pct = ((tp_price - entry) / entry * 100) if side == "BUY" else ((entry - tp_price) / entry * 100)
-                sl_pct = ((entry - sl_price) / entry * 100) if side == "BUY" else ((sl_price - entry) / entry * 100)
-
-                msg = (
-                    f"<pre>"
-                    f"📌 Posisi Aktif : {symbol}\n"
-                    f"📥 Side         : {side}\n"
-                    f"🎯 Entry        : {entry:.6f}\n"
-                    f"📦 Jumlah       : {qty}\n"
-                    f"🎯 TP Target    : {tp_price:.6f} ({tp_pct:.2f}%)\n"
-                    f"🛑 SL Target    : {sl_price:.6f} ({sl_pct:.2f}%)\n"
-                    f"📉 Mark         : {mark_price:.6f}\n"
-                    f"💰 PnL          : {pnl:.4f} USDT\n"
-                    f"📊 PnL %        : {pnl_pct:.2f}%\n"
-                    f"⏰ Last Update  : {now}\n"
-                    f"</pre>"
-                )
-
-                if symbol in self.position_messages:
-                    await self.telegram_service.edit_message(
-                        session,
-                        self.position_messages[symbol],
-                        msg
-                    )
-                else:
-                    res = await session.post(
-                        f"{self.telegram_service.base_url}/sendMessage",
-                        data={
-                            'chat_id': self.telegram_service.config.chat_id,
-                            'text': msg,
-                            'parse_mode': 'HTML'
-                        }
-                    )
-                    res_json = await res.json()
-                    if 'result' in res_json and 'message_id' in res_json['result']:
-                        self.position_messages[symbol] = res_json['result']['message_id']
-
-                closed = False
-                if side == "BUY":
-                    if mark_price >= tp_price:
-                        print(f"✨ TP {symbol} at {mark_price:.4f}")
-                        await self.binance_service.place_order(session, symbol, "SELL", reduce_only=True)
-                        closed = True
-                        self.trade_manager.reset_consecutive_losses()
-                    elif mark_price <= sl_price:
-                        print(f"⛔ SL {symbol} at {mark_price:.4f}")
-                        await self.binance_service.place_order(session, symbol, "SELL", reduce_only=True)
-                        closed = True
-                        self.trade_manager.increment_consecutive_losses()
-                else:  # SELL
-                    if mark_price <= tp_price:
-                        print(f"✨ TP {symbol} at {mark_price:.4f}")
-                        await self.binance_service.place_order(session, symbol, "BUY", reduce_only=True)
-                        closed = True
-                        self.trade_manager.reset_consecutive_losses()
-                    elif mark_price >= sl_price:
-                        print(f"⛔ SL {symbol} at {mark_price:.4f}")
-                        await self.binance_service.place_order(session, symbol, "BUY", reduce_only=True)
-                        closed = True
-                        self.trade_manager.increment_consecutive_losses()
-
-                if closed:
-                    entry_time = position.timestamp
-                    exit_time = datetime.now()
-                    duration = exit_time - entry_time
-                    minutes = int(duration.total_seconds() // 60)
-                    seconds = int(duration.total_seconds() % 60)
-                    trade_duration = f"{minutes}m {seconds}s"
-
-                    trade = {
-                        "symbol": symbol,
-                        "entry": entry,
-                        "exit": mark_price,
-                        "qty": qty,
-                        "pnl": pnl,
-                        "timestamp": exit_time,
-                        "duration": trade_duration
-                    }
-                    self.trade_manager.add_trade(trade)
-
-                    print(f"✅ CLOSE {symbol} | PnL: {pnl:.4f} | Durasi: {trade_duration}")
-
-                    image_path = f"/tmp/{symbol}_{int(datetime.now().timestamp())}.png"
-                    chart_background_path = "./assets/bg.png"
-                    create_trading_report(symbol, pnl_pct, trade_duration, image_path, background_path=chart_background_path)
-                    await self.telegram_service.send_photo(session, image_path, caption=f"{symbol} closed with {'profit' if pnl > 0 else 'loss'}")
-                    os.remove(image_path)
-
-                    await self.telegram_service.send_message(
-                        session,
-                        f"<pre>"
-                        f"✅ CLOSE {symbol}\n"
-                        f"📥 Side: {side}\n"
-                        f"🎯 Entry: {entry:.6f}\n"
-                        f"📈 Exit: {mark_price:.6f}\n"
-                        f"🎯 TP: {tp_price:.6f} | 🛑 SL: {sl_price:.6f}\n"
-                        f"💰 PnL: {pnl:.4f} USDT\n"
-                        f"⏰ Durasi: {trade_duration}"
-                        f"</pre>"
-                    )
-
-                    self.trade_manager.remove_position(symbol)
-                    if symbol in self.position_messages:
-                        del self.position_messages[symbol]
-
+                try:
+                    # Get current position from Binance
+                    current_position = await self.binance_service.get_position(session, symbol)
+                    
+                    if not current_position:
+                        # Position was closed
+                        print(f"\n🔍 Checking closed position for {symbol}...")
+                        
+                        # Get last trade to determine exit price
+                        trades = await self.binance_service.get_trades(session, symbol)
+                        if trades:
+                            last_trade = trades[0]  # Most recent trade
+                            exit_price = float(last_trade['price'])
+                            
+                            # Calculate PnL
+                            qty = abs(float(position.qty))
+                            if position.side == "BUY":
+                                pnl = (exit_price - position.entry) * qty
+                                pnl_pct = ((exit_price - position.entry) / position.entry) * 100
+                            else:
+                                pnl = (position.entry - exit_price) * qty
+                                pnl_pct = ((position.entry - exit_price) / position.entry) * 100
+                            
+                            roi = (pnl / position.margin) * 100
+                            
+                            # Calculate duration
+                            duration = datetime.now() - position.timestamp
+                            duration_str = str(duration).split('.')[0]  # Remove microseconds
+                            
+                            # Determine close reason
+                            close_reason = "TP" if pnl > 0 else "SL"
+                            
+                            # Get current balance
+                            balance = await self.binance_service.get_account_balance(session)
+                            
+                            # Calculate price change after 5 minutes
+                            entry_time = position.timestamp
+                            five_min_later = entry_time + timedelta(minutes=5)
+                            klines = await self.binance_service.get_klines(
+                                session, 
+                                symbol, 
+                                interval='5m',
+                                limit=2
+                            )
+                            if not klines.empty:
+                                price_5m = float(klines.iloc[0]['close'])
+                                price_change_5m = ((price_5m - position.entry) / position.entry) * 100
+                            else:
+                                price_change_5m = 0.0
+                            
+                            # Calculate BB width
+                            bb_width = position.upper_band - position.lower_band
+                            
+                            # Calculate trend strength (using EMA ratio)
+                            trend_strength = position.ema20 / position.ema50 if position.ema50 != 0 else 0
+                            
+                            # Save trade data
+                            self.save_trade_to_csv({
+                                'symbol': symbol,
+                                'side': position.side,
+                                'entry_price': position.entry,
+                                'exit_price': exit_price,
+                                'quantity': qty,
+                                'leverage': position.leverage,
+                                'pnl': pnl,
+                                'pnl_percent': pnl_pct,
+                                'roi': roi,
+                                'duration': duration_str,
+                                'close_reason': close_reason,
+                                'balance': balance,
+                                'margin_used': position.margin,
+                                'margin_call_price': position.liquidation_price,
+                                'take_profit': position.tp_price,
+                                'stop_loss': position.sl_price,
+                                'atr': position.atr,
+                                'spread': position.spread,
+                                'signal_mode': self.config.trading.mode,
+                                'rsi': position.rsi,
+                                'ema20': position.ema20,
+                                'ema50': position.ema50,
+                                'last_close': position.last_close,
+                                'lower_band': position.lower_band,
+                                'upper_band': position.upper_band,
+                                'is_green': position.is_green,
+                                'is_red': position.is_red,
+                                'signal': position.signal,
+                                'volume_now': position.volume_now,
+                                'volume_avg10': position.volume_avg10,
+                                'entry_time': position.timestamp,
+                                'exit_time': datetime.now(),
+                                'reason': position.reason,
+                                'price_change_5m': price_change_5m,
+                                'bb_width': bb_width,
+                                'trend_strength': trend_strength,
+                                'candle_pattern': position.candle_pattern,
+                                'entry_confidence_score': position.entry_confidence_score
+                            })
+                            
+                            # Send Telegram notification for closed position
+                            result_emoji = "✅" if pnl > 0 else "❌"
+                            await self.telegram_service.send_message(
+                                session,
+                                f"{result_emoji} CLOSE {symbol}\n"
+                                f"Side: {position.side}\n"
+                                f"Entry: {position.entry:.8f}\n"
+                                f"Exit: {exit_price:.8f}\n"
+                                f"TP: {position.tp_price:.8f} | SL: {position.sl_price:.8f}\n"
+                                f"PnL: {pnl:.4f} USDT\n"
+                                f"📊 ROI: {roi:.2f}%\n"
+                                f"Durasi: {duration_str}"
+                            )
+                            
+                            # Create and send trade result image
+                            image_path = f"/tmp/trade_result_{symbol}_{int(datetime.now().timestamp())}.png"
+                            create_trading_report(
+                                symbol=symbol,
+                                pnl=pnl_pct,
+                                trade_time=duration_str,
+                                output_path=image_path
+                            )
+                            
+                            try:
+                                await self.telegram_service.send_photo(
+                                    session,
+                                    image_path,
+                                    caption=f"{symbol} closed with {close_reason.lower()}"
+                                )
+                            finally:
+                                os.remove(image_path)
+                            
+                            # Remove from active positions
+                            self.trade_manager.remove_position(symbol)
+                            if symbol in self.position_messages:
+                                del self.position_messages[symbol]
+                        else:
+                            print(f"❌ No trade data found for {symbol}")
+                    else:
+                        # Update position with current data
+                        position.qty = float(current_position['positionAmt'])
+                        entry_price = float(current_position['entryPrice'])
+                        
+                        # Get current mark price
+                        current_price = await self.binance_service.get_mark_price(session, symbol)
+                        if current_price > 0:
+                            position.mark_price = current_price
+                            
+                        # Calculate liquidation price based on leverage and margin
+                        qty = abs(float(position.qty))
+                        margin_used = (qty * position.entry) / position.leverage
+                        
+                        # Check if TP or SL is hit
+                        if position.mark_price > 0:  # Ensure we have valid mark price
+                            # Add small tolerance (0.01%) to account for spread and price fluctuations
+                            tolerance = position.mark_price * 0.0001  # 0.01%
+                            close_reason = None
+                            
+                            if position.side == "BUY":
+                                # For long positions
+                                if position.mark_price >= (position.tp_price - tolerance):
+                                    print(f"🎯 TP hit for {symbol} at {position.mark_price} (TP: {position.tp_price}, Tolerance: {tolerance:.8f})")
+                                    close_reason = "TP"
+                                    # Close position
+                                    await self.binance_service.place_order(
+                                        session,
+                                        symbol,
+                                        "SELL",
+                                        abs(position.qty),
+                                        reduce_only=True
+                                    )
+                                elif position.mark_price <= (position.sl_price + tolerance):
+                                    print(f"🛑 SL hit for {symbol} at {position.mark_price} (SL: {position.sl_price}, Tolerance: {tolerance:.8f})")
+                                    close_reason = "SL"
+                                    # Close position
+                                    await self.binance_service.place_order(
+                                        session,
+                                        symbol,
+                                        "SELL",
+                                        abs(position.qty),
+                                        reduce_only=True
+                                    )
+                            else:
+                                # For short positions
+                                if position.mark_price <= (position.tp_price + tolerance):
+                                    print(f"🎯 TP hit for {symbol} at {position.mark_price} (TP: {position.tp_price}, Tolerance: {tolerance:.8f})")
+                                    close_reason = "TP"
+                                    # Close position
+                                    await self.binance_service.place_order(
+                                        session,
+                                        symbol,
+                                        "BUY",
+                                        abs(position.qty),
+                                        reduce_only=True
+                                    )
+                                elif position.mark_price >= (position.sl_price - tolerance):
+                                    print(f"🛑 SL hit for {symbol} at {position.mark_price} (SL: {position.sl_price}, Tolerance: {tolerance:.8f})")
+                                    close_reason = "SL"
+                                    # Close position
+                                    await self.binance_service.place_order(
+                                        session,
+                                        symbol,
+                                        "BUY",
+                                        abs(position.qty),
+                                        reduce_only=True
+                                    )
+                            
+                            if close_reason:
+                                # Calculate PnL
+                                qty = abs(float(position.qty))
+                                if position.side == "BUY":
+                                    pnl = (position.mark_price - position.entry) * qty
+                                    pnl_pct = ((position.mark_price - position.entry) / position.entry) * 100
+                                else:
+                                    pnl = (position.entry - position.mark_price) * qty
+                                    pnl_pct = ((position.entry - position.mark_price) / position.entry) * 100
+                                
+                                roi = (pnl / margin_used * 100) if margin_used != 0 else 0
+                                
+                                # Calculate duration
+                                duration = datetime.now() - position.timestamp
+                                duration_str = str(duration).split('.')[0]  # Remove microseconds
+                                
+                                # Get current balance
+                                balance = await self.binance_service.get_account_balance(session)
+                                
+                                # Save trade data
+                                self.save_trade_to_csv({
+                                    'symbol': symbol,
+                                    'side': position.side,
+                                    'entry_price': position.entry,
+                                    'exit_price': position.mark_price,
+                                    'quantity': qty,
+                                    'leverage': position.leverage,
+                                    'pnl': pnl,
+                                    'roi': roi,
+                                    'duration': duration_str,
+                                    'close_reason': close_reason,
+                                    'balance': balance,
+                                    'margin_used': margin_used,
+                                    'margin_call_price': position.liquidation_price,
+                                    'take_profit': position.tp_price,
+                                    'stop_loss': position.sl_price,
+                                    'atr': position.atr,
+                                    'spread': position.spread,
+                                    'signal_mode': self.config.trading.mode,
+                                    'rsi': position.rsi,
+                                    'ema20': position.ema20,
+                                    'ema50': position.ema50,
+                                    'last_close': position.last_close,
+                                    'lower_band': position.lower_band,
+                                    'upper_band': position.upper_band,
+                                    'is_green': position.is_green,
+                                    'is_red': position.is_red,
+                                    'signal': position.signal,
+                                    'volume_now': position.volume_now,
+                                    'volume_avg10': position.volume_avg10,
+                                    'entry_time': position.timestamp,
+                                    'exit_time': datetime.now(),
+                                    'reason': position.reason,
+                                    'price_change_5m': position.price_change_5m,
+                                    'bb_width': position.upper_band - position.lower_band if position.upper_band and position.lower_band else 0.0,
+                                    'trend_strength': position.ema20 / position.ema50 if position.ema20 and position.ema50 else 0.0,
+                                    'candle_pattern': position.candle_pattern,
+                                    'entry_confidence_score': position.entry_confidence_score
+                                })
+                                
+                                # Send Telegram notification for closed position
+                                result_emoji = "✅" if pnl > 0 else "❌"
+                                await self.telegram_service.send_message(
+                                    session,
+                                    f"{result_emoji} CLOSE {symbol}\n"
+                                    f"Side: {position.side}\n"
+                                    f"Entry: {position.entry:.8f}\n"
+                                    f"Exit: {position.mark_price:.8f}\n"
+                                    f"TP: {position.tp_price:.8f} | SL: {position.sl_price:.8f}\n"
+                                    f"PnL: {pnl:.4f} USDT\n"
+                                    f"📊 ROI: {roi:.2f}%\n"
+                                    f"Durasi: {duration_str}"
+                                )
+                                
+                                # Create and send trade result image
+                                image_path = f"/tmp/trade_result_{symbol}_{int(datetime.now().timestamp())}.png"
+                                create_trading_report(
+                                    symbol=symbol,
+                                    pnl=pnl_pct,
+                                    trade_time=duration_str,
+                                    output_path=image_path
+                                )
+                                
+                                try:
+                                    await self.telegram_service.send_photo(
+                                        session,
+                                        image_path,
+                                        caption=f"{symbol} closed with {close_reason.lower()}"
+                                    )
+                                finally:
+                                    os.remove(image_path)
+                                
+                                # Remove from active positions
+                                self.trade_manager.remove_position(symbol)
+                                if symbol in self.position_messages:
+                                    del self.position_messages[symbol]
+                                
+                                continue
+                        
+                        # Calculate liquidation price with buffer
+                        buffer = 0.05  # 5% buffer
+                        if position.side == "BUY":
+                            # For long positions, liquidation price is lower
+                            # Add buffer to make it more realistic
+                            liquidation_price = position.entry * (1 - (1 / position.leverage) + buffer)
+                        else:
+                            # For short positions, liquidation price is higher
+                            # Subtract buffer to make it more realistic
+                            liquidation_price = position.entry * (1 + (1 / position.leverage) - buffer)
+                            
+                        # Ensure liquidation price is not zero or negative
+                        if liquidation_price <= 0:
+                            liquidation_price = position.entry * 0.5  # Set to 50% of entry price as fallback
+                            
+                        position.liquidation_price = liquidation_price
+                        
+                        # Validate entry price
+                        if entry_price <= 0:
+                            print(f"⚠️ Warning: Invalid entry price ({entry_price}) for {symbol}, skipping update")
+                            continue
+                            
+                        position.entry = entry_price
+                        
+                        # Calculate PnL
+                        qty = abs(position.qty)
+                        if position.side == "BUY":
+                            pnl = (position.mark_price - position.entry) * qty
+                            pnl_pct = ((position.mark_price - position.entry) / position.entry * 100)
+                        else:
+                            pnl = (position.entry - position.mark_price) * qty
+                            pnl_pct = ((position.entry - position.mark_price) / position.entry * 100)
+                        
+                        # Calculate ROI based on margin used
+                        roi = (pnl / margin_used * 100) if margin_used != 0 else 0
+                        
+                        # Calculate duration
+                        duration = datetime.now() - position.timestamp
+                        duration_str = str(duration).split('.')[0]  # Remove microseconds
+                        
+                        # Calculate price changes for TP/SL/Margin Call
+                        tp_change = ((position.tp_price - position.entry) / position.entry * 100)
+                        sl_change = ((position.sl_price - position.entry) / position.entry * 100)
+                        mc_change = ((position.liquidation_price - position.entry) / position.entry * 100)
+                        
+                        # Send Telegram notification for position update
+                        mode_prefix = "🤖 DEMO" if self.config.binance.bot_mode == "DEMO" else "💰 REAL"
+                        direction = "Long 🚀" if position.side == "BUY" else "Short 🔻"
+                        message = (
+                            f"<pre>\n"
+                            f"{mode_prefix} Posisi Aktif : {symbol} ({direction})\n"
+                            f"🎯 Entry        : {position.entry:.6f}\n"
+                            f"📦 Size         : {qty:.1f} {symbol.replace('USDT', '')}\n"
+                            f"🪙 Margin       : {margin_used:.2f} USDT\n"
+                            f"📈 Leverage     : {position.leverage}x ({margin_used:.2f} USDT)\n\n"
+                            f"💰 Mark Price   : {position.mark_price:.6f}\n"
+                            f"📊 Spread       : {position.spread:.6f}\n\n"
+                            f"📊 PNL:\n"
+                            f"   • Realized   : {pnl:+.4f} USDT\n"
+                            f"   • Percentage : {pnl_pct:+.2f}%\n"
+                            f"   • ROI        : {roi:+.2f}%\n\n"
+                            f"🎯 TP           : {position.tp_price:.6f} ({tp_change:+.2f}%)\n"
+                            f"🛑 SL           : {position.sl_price:.6f} ({sl_change:+.2f}%)\n"
+                            f"⚠️ Margin Call  : {position.liquidation_price:.6f} ({mc_change:+.2f}%)\n"
+                            f"⏰ Last Update  : {datetime.now().strftime('%H:%M:%S')}\n"
+                            f"</pre>"
+                        )
+                        
+                        # Check if we already have a message for this position
+                        if symbol in self.position_messages:
+                            # Update existing message
+                            await self.telegram_service.edit_message(
+                                session,
+                                self.position_messages[symbol],
+                                message
+                            )
+                        else:
+                            # Send new message and store its ID
+                            response = await self.telegram_service.send_message(
+                                session,
+                                message
+                            )
+                            if response and 'result' in response and 'message_id' in response['result']:
+                                self.position_messages[symbol] = response['result']['message_id']
+                        
+                        print(f"\n📊 Active Position Update:")
+                        print(f"Symbol: {symbol}")
+                        print(f"Side: {position.side}")
+                        print(f"Entry: {position.entry:.8f}")
+                        print(f"Size: {qty:.8f}")
+                        print(f"Margin: {margin_used:.2f} USDT")
+                        print(f"Leverage: {position.leverage}x")
+                        print(f"Mark Price: {position.mark_price:.8f}")
+                        print(f"Spread: {position.spread:.4f}%")
+                        print(f"PnL: {pnl:.2f} USDT ({pnl_pct:.2f}%)")
+                        print(f"ROI: {roi:.2f}%")
+                        print(f"TP: {position.tp_price:.8f}")
+                        print(f"SL: {position.sl_price:.8f}")
+                        print(f"Margin Call: {position.liquidation_price:.8f}")
+                        print(f"Duration: {duration_str}")
+                        
+                except Exception as e:
+                    print(f"❌ Error updating position {symbol}: {e}")
+                    continue
+            
+            # Wait for 5 seconds before next update
             await asyncio.sleep(5)
 
     async def bot_loop(self, session: aiohttp.ClientSession):
@@ -173,13 +561,15 @@ class TradingBot:
                 continue
 
             symbols = await self.binance_service.get_symbols(session)
+            print("🔍 Scanning market for opportunities...")
             results = await asyncio.gather(*[
-                self.trading_service.analyze(session, symbol, idx)
-                for idx, symbol in enumerate(symbols)
+                self.trading_service.analyze(session, symbol)
+                for symbol in symbols
             ])
 
-            candidates = [r for r in results if r and r[1] != "WAIT"]
+            candidates = [r for r in results if r and r["signal"] != "WAIT"]
             if not candidates:
+                print("💤 No trading opportunities found, waiting for next scan...")
                 await asyncio.sleep(self.config.risk.scan_interval)
                 continue
 
@@ -187,16 +577,16 @@ class TradingBot:
                 _, _, _, rsi, _ = item
                 return abs(rsi - 50)
 
-            strongest = max(candidates, key=signal_strength)
-            symbol, signal, price, rsi, atr = strongest
+            # Find the candidate with the strongest signal based on RSI deviation from 50
+            strongest_candidate = max(candidates, key=lambda x: abs(x["rsi"] - 50))
+            
+            # Extract all data from the strongest candidate
+            trade_data = strongest_candidate
 
-            await self.trading_service.process_trade(
+            # Store RSI and ATR in the position object
+            position = await self.trading_service.process_trade(
                 session,
-                symbol,
-                signal,
-                price,
-                rsi,
-                atr
+                trade_data
             )
 
             await asyncio.sleep(self.config.risk.scan_interval)
@@ -286,7 +676,7 @@ class TradingBot:
         ssl_context.verify_mode = ssl.CERT_NONE
 
         while True:
-            if await self.is_active_hour(22, 7):
+            # if await self.is_active_hour(22, 7):
                 print("⏰ Aktif! Menjalankan bot...")
                 async with aiohttp.ClientSession(
                     connector=aiohttp.TCPConnector(ssl=ssl_context)
@@ -303,9 +693,9 @@ class TradingBot:
                         self.update_positions(session),
                         self.start_summary_loops(session)
                     )
-            else:
-                print("🛑 Diluar jam aktif (22:00 - 07:00). Tidur 5 menit...")
-                await asyncio.sleep(300)  # 5 menit
+            # else:
+            #     print("🛑 Diluar jam aktif (22:00 - 07:00). Tidur 5 menit...")
+            #     await asyncio.sleep(300)  # 5 menit
 
 def main():
     bot = TradingBot()

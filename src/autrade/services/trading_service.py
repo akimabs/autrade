@@ -93,18 +93,83 @@ class TradingService:
         session: aiohttp.ClientSession,
         symbol: str,
         idx: int = 0
-    ) -> Optional[Tuple[str, str, float, float, float]]:
+    ) -> Optional[Dict[str, float]]:
         df = await self.binance.get_klines(session, symbol)
         if df.empty or len(df) < 30:
             return None
+
+        # Convert numeric columns to float
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
 
         close = df["close"]
         open_ = df["open"]
         high = df["high"]
         low = df["low"]
+        volume = df["volume"]
 
         last_close = close.iloc[-1]
         last_open = open_.iloc[-1]
+        last_high = high.iloc[-1]
+        last_low = low.iloc[-1]
+        last_volume = float(volume.iloc[-1])
+
+        # Calculate volume average for last 10 candles
+        volume_avg10 = float(volume.iloc[-10:].mean())
+
+        # Calculate price change in last 5 minutes
+        # Get the most recent 2 candles
+        recent_candles = close.iloc[-2:]
+        if len(recent_candles) == 2:
+            prev_close = recent_candles.iloc[0]
+            current_close = recent_candles.iloc[1]
+            price_change_5m = ((current_close - prev_close) / prev_close) * 100
+        else:
+            price_change_5m = 0.0
+            print("⚠️ Not enough candles to calculate price change")
+
+        # Detect candle pattern
+        candle_pattern = ""
+        body_size = abs(last_close - last_open)
+        upper_wick = last_high - max(last_open, last_close)
+        lower_wick = min(last_open, last_close) - last_low
+        total_size = last_high - last_low
+        
+        if total_size > 0:  # Avoid division by zero
+            body_ratio = body_size / total_size
+            upper_ratio = upper_wick / total_size
+            lower_ratio = lower_wick / total_size
+            
+            if last_close > last_open:  # Bullish candle
+                if body_ratio > 0.6:
+                    if upper_ratio < 0.1 and lower_ratio < 0.1:
+                        candle_pattern = "Bullish Marubozu"
+                    else:
+                        candle_pattern = "Strong Bullish"
+                elif body_ratio < 0.3:
+                    if lower_ratio > 0.6:
+                        candle_pattern = "Hammer"
+                    elif upper_ratio > 0.6:
+                        candle_pattern = "Inverted Hammer"
+                    else:
+                        candle_pattern = "Doji"
+                elif upper_ratio < 0.1 and lower_ratio > 0.4:
+                    candle_pattern = "Bullish Engulfing"
+            else:  # Bearish candle
+                if body_ratio > 0.6:
+                    if upper_ratio < 0.1 and lower_ratio < 0.1:
+                        candle_pattern = "Bearish Marubozu"
+                    else:
+                        candle_pattern = "Strong Bearish"
+                elif body_ratio < 0.3:
+                    if upper_ratio > 0.6:
+                        candle_pattern = "Shooting Star"
+                    elif lower_ratio > 0.6:
+                        candle_pattern = "Hanging Man"
+                    else:
+                        candle_pattern = "Doji"
+                elif lower_ratio < 0.1 and upper_ratio > 0.4:
+                    candle_pattern = "Bearish Engulfing"
 
         rsi = RSIIndicator(close).rsi().iloc[-1]
         ema20 = EMAIndicator(close, window=20).ema_indicator().iloc[-1]
@@ -126,101 +191,241 @@ class TradingService:
             lower_band, upper_band, is_green, is_red
         )
 
-        print(f"""
-        📊 ANALYZE [{idx + 1}] {symbol}
-        ├── Harga Terakhir : {last_close:.4f}
-        ├── RSI            : {rsi:.2f}
-        ├── EMA20 / EMA50  : {ema20:.4f} / {ema50:.4f}
-        ├── BollingerBand  : Lower={lower_band:.4f} | Upper={upper_band:.4f}
-        ├── ATR            : {atr:.4f}
-        ├── Candle Status  : {"GREEN ✅" if is_green else "RED ❌"}
-        └── Sinyal Akhir   : {signal}
-        """)
+        # Calculate entry confidence score (0-100)
+        entry_confidence_score = 0
+        if signal != "WAIT":
+            # RSI contribution (0-30 points)
+            if signal == "LONG":
+                rsi_score = max(0, 30 - (rsi - 30))  # Higher score for lower RSI in LONG
+            else:
+                rsi_score = max(0, 30 - (70 - rsi))  # Higher score for higher RSI in SHORT
+            
+            # Volume contribution (0-30 points)
+            volume_score = min(30, (last_volume / volume_avg10) * 15)
+            
+            # Trend contribution (0-40 points)
+            trend_score = 0
+            if signal == "LONG":
+                if ema20 > ema50:
+                    trend_score = min(40, ((ema20 / ema50 - 1) * 100))
+            else:
+                if ema20 < ema50:
+                    trend_score = min(40, ((1 - ema20 / ema50) * 100))
+            
+            entry_confidence_score = int(rsi_score + volume_score + trend_score)
 
-        return symbol, signal, last_close, rsi, atr
+        # Generate reason for the signal
+        reason = ""
+        if signal != "WAIT":
+            reasons = []
+            # Always add signal type as first reason
+            reasons.append(signal)
+            
+            # Add RSI reason
+            if rsi < 30:
+                reasons.append(f"RSI {rsi:.1f}")
+            elif rsi > 70:
+                reasons.append(f"RSI {rsi:.1f}")
+            
+            # Add EMA reason
+            if ema20 > ema50 * 1.01:
+                reasons.append("EMA20 > EMA50")
+            elif ema20 < ema50 * 0.99:
+                reasons.append("EMA20 < EMA50")
+            
+            # Add BB reason
+            if last_close < lower_band * 0.99:
+                reasons.append("Price < Lower BB")
+            elif last_close > upper_band * 1.01:
+                reasons.append("Price > Upper BB")
+            
+            # Add candle pattern if present
+            if candle_pattern:
+                reasons.append(candle_pattern)
+            
+            # If no specific reasons were found, add a default reason
+            if len(reasons) == 1:  # Only contains signal type
+                reasons.append("Technical Analysis")
+            
+            reason = " + ".join(reasons)
 
-    async def calculate_position_size(
-        self,
-        price: float,
-        atr: float
-    ) -> Tuple[Decimal, Decimal, Decimal]:
-        usdt = self.config.fixed_usdt_balance
-        price_decimal = Decimal(str(price))
-        qty = (
-            Decimal(usdt * self.config.trading.usdt_percentage * self.config.trading.leverage) /
-            price_decimal
-        ).quantize(Decimal('0.001'), rounding=ROUND_DOWN)
+            # Return data when there is a signal
+            # Calculate TP and SL prices based on ATR from settings
+            if signal == "LONG":
+                tp_price = last_close + (atr * self.config.trading.tp_atr_ratio)
+                sl_price = last_close - (atr * self.config.trading.sl_atr_ratio)
+            else:  # SHORT
+                tp_price = last_close - (atr * self.config.trading.tp_atr_ratio)
+                sl_price = last_close + (atr * self.config.trading.sl_atr_ratio)
 
-        atr_decimal = Decimal(str(atr))
-        tp_price = price_decimal + (atr_decimal * Decimal('1.2'))
-        sl_price = price_decimal - (atr_decimal * Decimal('0.8'))
+            # Calculate spread percentage
+            spread = ((last_high - last_low) / last_low) * 100
 
-        return qty, tp_price, sl_price
+            # Calculate Bollinger Bands width
+            bb_width = upper_band - lower_band
 
-    async def process_trade(
-        self,
-        session: aiohttp.ClientSession,
-        symbol: str,
-        signal: str,
-        price: float,
-        rsi: float,
-        atr: float
-    ) -> None:
-        if signal == "WAIT":
-            return
+            return {
+                "symbol": symbol,
+                "signal": signal,
+                "price": last_close,
+                "rsi": rsi,
+                "atr": atr,
+                "ema20": ema20,
+                "ema50": ema50,
+                "last_close": last_close,
+                "lower_band": lower_band,
+                "upper_band": upper_band,
+                "is_green": is_green,
+                "is_red": is_red,
+                "volume_now": last_volume,
+                "volume_avg10": volume_avg10,
+                "candle_pattern": candle_pattern,
+                "entry_confidence_score": entry_confidence_score,
+                "reason": reason,
+                "price_change_5m": price_change_5m,
+                "tp_price": tp_price,
+                "sl_price": sl_price,
+                "spread": spread,
+                "bb_width": bb_width
+            }
 
-        spread_ok, spread = await self.binance.check_spread(session, symbol)
-        if not spread_ok:
-            print(f"⚠️ Skip {symbol} due to high spread: {spread:.2f}%")
-            return
+        return None  # Return None when there is no signal
 
-        if price > 10 or price < 0.0001:
-            print(f"⚠️ Skip {symbol} karena harga tidak dalam rentang: {price}")
-            return
+    def calculate_position_size(self, price: float, atr: float) -> float:
+        """Calculate position size based on risk management rules"""
+        try:
+            # Get available balance
+            if self.config.binance.bot_mode == "DEMO":
+                balance = Decimal(str(self.config.fixed_usdt_balance))
+            else:
+                # For real mode, we'll get the actual balance from Binance
+                balance = Decimal(str(self.config.fixed_usdt_balance))  # This will be updated with real balance
 
-        qty = (
-            Decimal(self.config.fixed_usdt_balance * self.config.trading.usdt_percentage * self.config.trading.leverage) /
-            Decimal(str(price))
-        ).quantize(Decimal('0.001'), rounding=ROUND_DOWN)
+            # Convert price to Decimal
+            price_decimal = Decimal(str(price))
 
-        atr_decimal = Decimal(str(atr))
-        price_decimal = Decimal(str(price))
+            # Calculate position size based on USDT percentage
+            position_size = (balance * Decimal(str(self.config.trading.usdt_percentage)) * Decimal(str(self.config.trading.leverage))) / price_decimal
 
-        if signal == "LONG":
-            tp_price = price_decimal + (atr_decimal * Decimal('1.2'))
-            sl_price = price_decimal - (atr_decimal * Decimal('0.8'))
-            side = "BUY"
-        else:
-            tp_price = price_decimal - (atr_decimal * Decimal('1.2'))
-            sl_price = price_decimal + (atr_decimal * Decimal('0.8'))
-            side = "SELL"
+            # Limit maximum position size to 1000 units
+            max_position = Decimal('1000')
+            position_size = min(position_size, max_position)
 
-        notional = float(qty) * price
+            # Round to appropriate precision
+            position_size = float(position_size.quantize(Decimal('0.1')))  # Round to 1 decimal place
 
-        if notional < 5:
-            print(f"⚠️ Notional terlalu kecil untuk {symbol} → {notional:.2f} USDT")
-            return
+            print(f"💰 Balance: {float(balance):.2f} USDT")
+            print(f"🎯 Position Size: {position_size:.1f} units")
+            return position_size
 
-        side = "BUY" if signal == "LONG" else "SELL"
-        res = await self.binance.place_order(session, symbol, side, float(qty))
+        except Exception as e:
+            print(f"Error calculating position size: {e}")
+            return 0.0
 
-        if "orderId" in res:
-            position = Position(
-                entry=price,
-                qty=float(qty),
-                side=side,
-                tp_price=tp_price,
-                sl_price=float(sl_price),
-                timestamp=datetime.now()
-            )
-            self.trade_manager.add_position(symbol, position)
-            self.trade_manager.increment_daily_trade_count()
-
-            print(f"📈 ENTRY {symbol} | Qty: {qty} | Price: {price:.4f}")
-            print(f"➡️ TP: {tp_price:.6f}, SL: {sl_price:.6f} (ATR: {atr:.4f})")
-
-            direction = "LONG 🚀" if side == "BUY" else "SHORT 🔻"
-            await self.telegram.send_message(
+    async def process_trade(self, session: aiohttp.ClientSession, trade_data: Dict) -> Optional[Position]:
+        """Process a trade based on analysis results"""
+        try:
+            symbol = trade_data["symbol"]
+            signal = trade_data["signal"]
+            entry_confidence_score = trade_data["entry_confidence_score"]
+            
+            # Check if we already have a position for this symbol
+            if symbol in self.trade_manager.positions:
+                print(f"⚠️ Already have a position for {symbol}")
+                return None
+            
+            # Check if we have enough confidence to trade
+            if entry_confidence_score <= 30:
+                print(f"⚠️ Confidence score too low ({entry_confidence_score}) for {symbol}, skipping trade")
+                return None
+            
+            # Get current price and calculate position size
+            current_price = await self.binance.get_mark_price(session, symbol)
+            if current_price <= 0:
+                print(f"❌ Invalid price for {symbol}: {current_price}")
+                return None
+            
+            # Calculate position size based on risk management
+            balance = await self.binance.get_account_balance(session)
+            position_size = self.calculate_position_size(balance, current_price)
+            
+            if position_size <= 0:
+                print(f"❌ Invalid position size for {symbol}: {position_size}")
+                return None
+            
+            # Place the order
+            order = await self.binance.place_order(
                 session,
-                f"📈 ENTRY {symbol} | {direction} | Price: {price:.4f} | RSI: {rsi:.2f} | ATR: {atr:.4f}"
-            ) 
+                symbol,
+                signal,
+                position_size
+            )
+            
+            if not order:
+                print(f"❌ Failed to place order for {symbol}")
+                return None
+            
+            # Create position object
+            position = Position(
+                entry=current_price,
+                qty=position_size,
+                side=signal,
+                tp_price=trade_data["tp_price"],
+                sl_price=trade_data["sl_price"],
+                timestamp=datetime.now(),
+                margin=position_size * current_price / self.config.trading.leverage,
+                leverage=self.config.trading.leverage,
+                mark_price=current_price,
+                spread=trade_data["spread"],
+                rsi=trade_data["rsi"],
+                atr=trade_data["atr"],
+                ema20=trade_data["ema20"],
+                ema50=trade_data["ema50"],
+                last_close=trade_data["last_close"],
+                lower_band=trade_data["lower_band"],
+                upper_band=trade_data["upper_band"],
+                is_green=trade_data["is_green"],
+                is_red=trade_data["is_red"],
+                signal=trade_data["signal"],
+                volume_now=trade_data["volume_now"],
+                volume_avg10=trade_data["volume_avg10"],
+                reason=trade_data["reason"],
+                price_change_5m=trade_data["price_change_5m"],
+                candle_pattern=trade_data["candle_pattern"],
+                entry_confidence_score=entry_confidence_score
+            )
+            
+            # Add position to manager
+            self.trade_manager.add_position(symbol, position)
+            
+            # Send Telegram notification
+            mode_prefix = "🤖 DEMO" if self.config.binance.bot_mode == "DEMO" else "💰 REAL"
+            direction = "Long 🚀" if signal == "BUY" else "Short 🔻"
+            message = (
+                f"<pre>\n"
+                f"{mode_prefix} New Position : {symbol} ({direction})\n"
+                f"🎯 Entry        : {current_price:.6f}\n"
+                f"📦 Size         : {position_size:.1f} {symbol.replace('USDT', '')}\n"
+                f"🪙 Margin       : {(position_size * current_price / self.config.trading.leverage):.2f} USDT\n"
+                f"📈 Leverage     : {self.config.trading.leverage}x\n\n"
+                f"📊 Analysis:\n"
+                f"   • RSI        : {trade_data['rsi']:.1f}\n"
+                f"   • EMA20      : {trade_data['ema20']:.6f}\n"
+                f"   • EMA50      : {trade_data['ema50']:.6f}\n"
+                f"   • BB Width   : {trade_data['bb_width']:.6f}\n"
+                f"   • Volume     : {trade_data['volume_now']:.1f} vs {trade_data['volume_avg10']:.1f}\n"
+                f"   • Pattern    : {trade_data['candle_pattern']}\n"
+                f"   • Confidence : {entry_confidence_score:.1f}\n\n"
+                f"🎯 TP           : {trade_data['tp_price']:.6f}\n"
+                f"🛑 SL           : {trade_data['sl_price']:.6f}\n"
+                f"⏰ Time         : {datetime.now().strftime('%H:%M:%S')}\n"
+                f"</pre>"
+            )
+            
+            await self.telegram.send_message(session, message)
+            
+            return position
+            
+        except Exception as e:
+            print(f"❌ Error processing trade: {e}")
+            return None 

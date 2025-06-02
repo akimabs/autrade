@@ -12,38 +12,47 @@ class TelegramService:
         session: aiohttp.ClientSession,
         message: str,
         parse_mode: str = 'HTML'
-    ) -> None:
+    ) -> Optional[dict]:
         try:
-            await session.post(
+            async with session.post(
                 f"{self.base_url}/sendMessage",
                 data={
                     'chat_id': self.config.chat_id,
                     'text': message,
                     'parse_mode': parse_mode
                 }
-            )
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    print(f"❌ Error sending Telegram message: {await response.text()}")
+                    return None
         except Exception as e:
-            print(f"Telegram error: {e}")
+            print(f"❌ Error sending Telegram message: {e}")
+            return None
 
     async def edit_message(
         self,
         session: aiohttp.ClientSession,
         message_id: int,
-        message: str,
+        text: str,
         parse_mode: str = 'HTML'
     ) -> None:
+        """Edit an existing message"""
         try:
-            await session.post(
+            async with session.post(
                 f"{self.base_url}/editMessageText",
                 data={
                     'chat_id': self.config.chat_id,
                     'message_id': message_id,
-                    'text': message,
+                    'text': text,
                     'parse_mode': parse_mode
                 }
-            )
+            ) as response:
+                if response.status != 200:
+                    print(f"❌ Error editing Telegram message: {await response.text()}")
         except Exception as e:
-            print(f"Telegram edit error: {e}")
+            print(f"❌ Error editing Telegram message: {e}")
 
     async def send_photo(
         self,

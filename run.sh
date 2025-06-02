@@ -3,6 +3,7 @@
 # Function to start the application
 start_app() {
     echo "🚀 Starting application..."
+    source venv/bin/activate
     python -m autrade.main
 }
 
